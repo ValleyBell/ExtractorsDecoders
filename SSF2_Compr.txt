@@ -1,0 +1,60 @@
+Code at 0919C8-091A30 [decompressed from SP2.X, offset 00083A]
+
+Registers:
+    A0 - [input] compressed source data
+    A1 - [input] buffer for decompressed data
+    D0 - remaining bits in "flags" value
+    D1 - "flags" value
+    D2 - data copy: read offset
+    D3 - data copy: byte count
+SSF2_Decompress:
+0919C8	moveq	#0, d0
+0919CA	bra.s	$0919CE
+0919CC	move.b	(a0)+, (a1)+
+
+0919CE	 dbra	d0, $0919D6
+0919D2	 addq.w	#8, d0
+0919D4	 move.b	(a0)+, d1
+0919D6	 add.b	d1, d1
+0919D8	bcs.s	$0919CC		; copy single byte from source -> destination
+0919DA	moveq	#-1, d2
+0919DC	 dbra	d0, $0919E4
+0919E0	 addq.w	#8, d0
+0919E2	 move.b	(a0)+, d1
+0919E4	 add.b	d1, d1
+0919E6	bcs.s	$091A06
+
+0919E8	move.b	(a0)+, d2
+0919EA	moveq	#7, d3
+0919EC	and.b	d2, d3
+0919EE	bne.s	$0919F6
+0919F0	move.b	(a0)+, d3
+0919F2	beq.s	$091A30
+0919F4	subq.w	#1, d3
+0919F6	lsl.w	#5, d2
+0919F8	move.b	(a0)+, d2
+0919FA	lea	(a1,d2.w), a2
+0919FE	move.b	(a2)+, (a1)+
+091A00	dbra	d3, $0919FE
+091A04	bra.s	$0919CE
+
+091A06	moveq	#0, d3
+091A08	 dbra	d0, $091A10
+091A0C	 addq.w	#8, d0
+091A0E	 move.b	(a0)+, d1
+091A10	 add.b	d1, d1
+091A12	addx.w	d3, d3
+091A14	 dbra	d0, $091A1A
+091A18	 addq.w	#8, d0
+091A1A	 move.b	(a0)+, d1
+091A1C	 add.b	d1, d1
+091A1E	addx.w	d3, d3
+091A20	 dbra	d0, $091A28
+091A24	 addq.w	#8, d0
+091A26	 move.b	(a0)+, d1
+091A28	 add.b	d1, d1
+091A2A	addx.w	d3, d3
+091A2C	addq.w	#1, d3
+091A2E	bra	$0919F8
+
+091A30	rts
