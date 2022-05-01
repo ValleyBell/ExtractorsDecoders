@@ -1,6 +1,7 @@
-// Twinkle Soft Decompressor
-// -------------------------
+// Kenji Decompressor
+// ------------------
 // Valley Bell, written on 2017-03-27 / 2017-04-02
+// updated with fixed LZSS initialization on 2022-05-01
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,17 +25,17 @@ int main(int argc, char* argv[])
 	UINT8* inData;
 	UINT8 fileFmt;
 	
-	printf("Twinkle Soft Decompressor\n-------------------------\n");
+	printf("Kenji Decompressor\n------------------\n");
 	if (argc < 3)
 	{
-		printf("Usage: twinkle_dec.exe [Options] input.bin output.bin\n");
+		printf("Usage: kenji_dec.exe [Options] input.bin output.bin\n");
 		printf("Options:\n");
 		printf("    -0  single/archive autodetection\n");
-		printf("    -1  single file (.##1 extention)\n");
-		printf("    -2  archive (.##2 extention)\n");
+		printf("    -1  single file (.##1 extension)\n");
+		printf("    -2  archive (.##2 extension)\n");
 		printf("        Note: File names are generated using the output name.\n");
 		printf("        Example: output.bin -> output_00.bin, output_01.bin, etc.\n");
-		printf("Supported/verified games: Bunretsu Shugo Shin Twinkle Star\n");
+		printf("for files and archives used by Kenji's adventure engine\n");
 		return 0;
 	}
 	
@@ -216,6 +217,42 @@ static void DecompressArchive(UINT32 arcSize, const UINT8* arcData, const char* 
 #define THRESHOLD	2	/* encode string into position and length
 						   if match_length is greater than this */
 
+static void LZSS_BufInit(UINT8* text_buf)
+{
+	// Important Note: These are non-standard values and ARE used by the compressed data.
+	UINT16 bufPos;
+	UINT16 regD0;
+	UINT16 regD1;
+	
+	// LZSS table initialization, originally from Arcus Odyssey X68000, M_DRV.X
+	// verified using TSTAR.EXE
+	bufPos = 0x0000;
+	// 000..CFF (0x0D bytes of 00, 01, 02, ... FF each)
+	for (regD0 = 0x00; regD0 < 0x100; regD0 ++)
+	{
+		for (regD1 = 0x00; regD1 < 0x0D; regD1 ++, bufPos ++)
+			text_buf[bufPos] = (UINT8)regD0;
+	}
+	// AD00..ADFF (00 .. FF)
+	for (regD0 = 0x00; regD0 < 0x100; regD0 ++, bufPos ++)
+		text_buf[bufPos] = (UINT8)regD0;
+	// AE00..AEFF (FF .. 00)
+	do
+	{
+		regD0 --;
+		text_buf[bufPos] = (UINT8)regD0;
+		bufPos ++;
+	} while(regD0 > 0x00);
+	// AF00..AF7F (0x80 times 00)
+	for (regD0 = 0x00; regD0 < 0x80; regD0 ++, bufPos ++)
+		text_buf[bufPos] = 0x00;
+	// AF80..AFED (0x6E times 20/space)
+	for (regD0 = 0x00; regD0 < 0x80 - F; regD0 ++, bufPos ++)
+		text_buf[bufPos] = ' ';
+	
+	return;
+}
+
 UINT32 LZSS_Decode(UINT32 inLen, const UINT8* inData, UINT32 outLen, UINT8* outData)
 {
 	UINT32 inPos, outPos;
@@ -224,7 +261,7 @@ UINT32 LZSS_Decode(UINT32 inLen, const UINT8* inData, UINT32 outLen, UINT8* outD
 	int  i, j, k, r, c;
 	unsigned int  flags;
 	
-	for (i = 0; i < N - F; i++) text_buf[i] = 0x00;
+	LZSS_BufInit(text_buf);
 	r = N - F;  flags = 0;
 	inPos = outPos = 0;
 	while(inPos < inLen && outPos < outLen) {
