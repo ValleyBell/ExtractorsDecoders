@@ -3,9 +3,22 @@
 This repository contains Various tools to extract and decompress game archives I wrote over the years.
 In most cases the goal was to extract game music.
 
+## CompileMLKTool
+
+This tool extracts and creates `MLK` music archives used by various games developed by the Japanese game developer "Compile".
+
+I developed it to extract the music from "Comet Summoner", which is part of Compile's "DiscStation Vol. 20". It is confirmed to work with all games from that disk.
+
+Notes about the MIDI files:
+
+- Looping has to be enabled using a flag in the MLK archive.
+- Custom loop markers are supported. "Control Change 31" is the Loop Start marker. Channel and value do not matter.
+- For some reason, "Time Signature" and "Key Signature" meta events are treated as Loop Start markers as well.
+- SysEx messages don't seem to work.
+
 ## danbidec
 
-Decrypts music files used by the Korean game developer "Danbi System".
+This tool decrypts music files used by the Korean game developer "Danbi System".
 
 The files are encrypted by XORing each byte with the low 8 bits of the file position.
 
@@ -19,11 +32,11 @@ I just wanted to get the MIDIs.
 
 ## DIMUnpack
 
-This tool unpacks certain `.DIM` files that I was unable to open with DiskExplorer.
+This tool unpacks certain `.DIM` disk image files that I was unable to open with DiskExplorer.
 
 ## FoxRangerExtract
 
-Extracts music from the archives used by the Korean game developer Soft Action, which was responsible for the "Fox Ranger" series.
+This tool extracts music from the archives used by the Korean game developer Soft Action, which was responsible for the "Fox Ranger" series.
 
 The archives themselves are unencrypted, but the unpacked files may need an XOR decryption.
 
@@ -81,7 +94,7 @@ The `.MF` files contain
 
 ## wolfteam\_dec
 
-Decompresses archives used in games developed by Wolf Team.
+This tool decompresses archives used in games developed by Wolf Team.
 
 The compression is standard LZSS with a non-standard initialization for the dictionary.
 
@@ -101,6 +114,6 @@ Super Street Fighter II uses LZSS with modifications to how the reference word w
 
 ## xordec
 
-A simple tool that XORs the while file with a certain key.
+A simple tool that XORs the whole file with a user-specified key.
 
 Some Korean game developers (e.g. Soft Action) use a simple XOR to encrypt their files.
