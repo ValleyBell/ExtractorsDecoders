@@ -16,6 +16,20 @@ Notes about the MIDI files:
 - For some reason, "Time Signature" and "Key Signature" meta events are treated as Loop Start markers as well.
 - SysEx messages don't seem to work.
 
+## CompileWLKTool
+
+This tool extracts and creates `WLK` sound archives used by various games developed by the Japanese game developer "Compile".
+
+While writing the music tool for "Comet Summoner", I had a look at the `WLK` files as well and they looked simple, so I wrote a tool for them as well.
+
+The tool is confirmed to work with all games from Compile's "DiscStation Vol. 20".  
+Sounds are extracted to WAV files (format is PCM, 8-bit/16-bit, mono), as well as an accompanying text file that includes the internal flags field, as well as original file names where present.
+
+There are two known variants of the `WLK` format:
+
+- v1 has no magic bytes at the beginning
+- v2 begins with "WLKF0200" and can optionally store the original file names and paths. "Comet Summoner" is one of the games that includes original file paths.
+
 ## danbidec
 
 This tool decrypts music files used by the Korean game developer "Danbi System".
