@@ -84,17 +84,22 @@ The compression is standard LZSS with a non-standard initialization for the dict
 
 This tool unpacks the `.LBX` files used by the DOS version of "Princess Maker 2".
 
-## mfd\_dec
-
-This is a tool for decrypting the PC-98 sound driver executable `MFD.COM`.
-
-It uses an XOR encryption with a key that changes based on the unencrypted data.
-
 ## mrndec
 
 This tool decompresses archives used by the Korean game developer "Mirinae Software".
 
 It was confirmed to work with the .MUE files from their "The Day" series.
+
+## piyo\_dec
+
+This is a tool for decrypting the PC-98 executables (both `COM` and `EXE`) from games by PANDA HOUSE.
+
+The encryption is easily identifyable by the string `PIYO`, which can be found offset 06h in COM files or within the last 120 bytes of an EXE file.
+It uses an XOR encryption with a key that changes based on the unencrypted data.
+
+I initially wrote it as "mfd\_dec" with the goal of decrypting the `MFD.COM` sound driver executable.
+
+The source code contains comments about the file structure of encrypted executables.
 
 ## rekiai\_dec
 
