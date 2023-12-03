@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <stdtype.h>
+#include "stdtype.h"
 
 
 static void DecompressFile(UINT32 inLen, const UINT8* inData, const char* fileName);

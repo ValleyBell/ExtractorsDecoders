@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <stdtype.h>
+#include "stdtype.h"
 
 
 static UINT8 DetectFileType(UINT32 fileSize, const UINT8* fileData, const char* fileName);

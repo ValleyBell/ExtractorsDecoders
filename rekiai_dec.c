@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <stdtype.h>
+#include "stdtype.h"
 
 
 static const char* GetFileExt(const char* filePath);

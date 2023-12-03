@@ -35,7 +35,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <stdtype.h>
+#include "stdtype.h"
 
 
 #ifdef _MSC_VER
