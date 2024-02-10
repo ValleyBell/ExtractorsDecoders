@@ -84,6 +84,17 @@ The compression is standard LZSS with a non-standard initialization for the dict
 
 This tool unpacks the `.LBX` files used by the DOS version of "Princess Maker 2".
 
+## lzss-lib / lzss-tool
+
+This library and tool allow you to decompress and recompress LZSS-compressed data.
+
+Tool and libary allow to specify various compression parameters like:
+- the initial values of the LZSS dictionary
+- the bit order of the control characters
+- the format of the backward reference word
+
+The tool also allows you to specify a file header format using the additional parameters. This way simple LZSS-compressed containers can be supported as well.
+
 ## mrndec
 
 This tool decompresses archives used by the Korean game developer "Mirinae Software".
