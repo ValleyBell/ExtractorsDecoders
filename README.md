@@ -3,6 +3,18 @@
 This repository contains Various tools to extract and decompress game archives I wrote over the years.
 In most cases the goal was to extract game music.
 
+A CMake project file is included that allows you to quickly build all tools.
+The general compilation process is:
+
+- `mkdir build`
+- `cd build`
+- compiling with GCC:
+  - `cmake .. -DCMAKE_BUILD_TYPE=Release`
+  - `cmake --build .`
+- compiling with MS Visual C++:
+  - `cmake ..`
+  - `cmake --build . --config Release`
+
 ## CompileMLKTool
 
 This tool extracts and creates `MLK` music archives used by various games developed by the Japanese game developer "Compile".
