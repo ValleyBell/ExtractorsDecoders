@@ -158,7 +158,35 @@ int main(int argc, char *argv[])
 			if (endptr != argv[argbase])
 			{
 				cfg.flags &= ~(LZSS_FLAGS_MTCH_EMASK | LZSS_FLAGS_MTCH_LMASK);
-				cfg.flags |= (val << 4);
+				cfg.flags |= (uint8_t)(val << 4);
+			}
+		}
+		else if (!strcmp(argv[argbase], "-O"))	// start offset for writing to name table buffer
+		{
+			argbase ++;
+			if (argbase >= argc)
+			{
+				fprintf(stderr, "Insufficient arguments.\n");
+				return 1;
+			}
+			val = strtol(argv[argbase], &endptr, 0);
+			if (endptr != argv[argbase])
+			{
+				cfg.nameTblStartOfs = (int)val;
+			}
+		}
+		else if (!strcmp(argv[argbase], "-E"))	// end-of-stream mode
+		{
+			argbase ++;
+			if (argbase >= argc)
+			{
+				fprintf(stderr, "Insufficient arguments.\n");
+				return 1;
+			}
+			val = strtol(argv[argbase], &endptr, 0);
+			if (endptr != argv[argbase])
+			{
+				cfg.eosMode = (uint8_t)val;
 			}
 		}
 		else
@@ -219,13 +247,13 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "Header parsing error!\n");
 			return 4;
 		}
-		if (inFile.len > cmpSize)
-			inFile.len = cmpSize;
+		if (inFile.len > dataOfs + cmpSize)
+			inFile.len = dataOfs + cmpSize;
 		outFile.data = (uint8_t*)malloc(outFile.len);
 		ret = lzssDecode(lzss, outFile.len, outFile.data, &outFile.len, inFile.len - dataOfs, &inFile.data[dataOfs]);
 	}
 	if (ret != LZSS_ERR_OK)
-		fprintf(stderr, "LZSS error code %u after writing %zu bytes.\n", ret, outFile.len);
+		fprintf(stderr, "LZSS error code %u after writing %u bytes.\n", ret, (unsigned)outFile.len);
 
 	fp = fopen(argv[argbase + 1], "wb");
 	if (fp == NULL)
@@ -269,6 +297,9 @@ static void PrintHelp(const char* appName)
 	fprintf(stderr, "    -R n  reference word format (bit mask, default: 0x01)\n");
 	fprintf(stderr, "          mask 0x03: nibble position (0 = highest .. 3 = lowest)\n");
 	fprintf(stderr, "          mask 0x04: byte endianess (0 = Little Endian, 4 = Big Endian)\n");
+	fprintf(stderr, "    -O n  offset where name table buffer starts getting written to\n");
+	fprintf(stderr, "          (range: 0x000..0xFFF, default: 0xFEE)\n");
+	fprintf(stderr, "    -E n  end-of-stream mode (0 = no EOS marker, 1 = end with null-reference)\n");
 	return;
 }
 
@@ -280,10 +311,10 @@ static void ChooseHeaderSetVal(ARC_HDR_SPEC* header, char item_type)
 
 	for (hdrItem = 0; hdrItem < header->count; hdrItem++)
 	{
-		ARC_HDR_VAL* ahv = &header->vals[header->count];
+		ARC_HDR_VAL* ahv = &header->vals[hdrItem];
 		if (ahv->type != item_type)
 			continue;
-		if (ahv->type != 'o' || ahv->type != 'c')
+		if (ahv->type != 'o' && ahv->type != 'c')
 			continue;
 		ahv->d.size.set_val = 0;
 		if (ahv->d.size.bytes >= lastSize)

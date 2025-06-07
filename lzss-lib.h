@@ -21,9 +21,11 @@ struct _lzss_config
 {
 	uint8_t flags;			// see LZSS_FLAGS_*
 	uint8_t nameTblType;	// see LZSS_NTINIT_*
-	uint8_t nameTblValue;
-	LZSS_NAMETBL_FUNC nameTblFunc;
-	void* ntFuncParam;
+	uint8_t nameTblValue;	// (for nameTblType == LZSS_NTINIT_VALUE)
+	LZSS_NAMETBL_FUNC nameTblFunc;	// (for nameTblType == LZSS_NTINIT_FUNC)
+	void* ntFuncParam;		// user parameter for nameTblFunc
+	int nameTblStartOfs;	// offset where the name table buffer starts getting written to
+	uint8_t eosMode;		// see LZSS_EOSM_*
 };
 
 // control word flags
@@ -57,6 +59,13 @@ struct _lzss_config
 #define LZSS_NTINIT_VALUE	0x00	// initialize name table via constant value
 #define LZSS_NTINIT_FUNC	0x01	// initialize name table via function
 #define LZSS_NTINIT_NONE	0x02	// don't initialize name table and don't use initial values
+
+// name table start offset, special values
+#define LZSS_NTSTOFS_NF		-1	// start at (N-F), i.e. 0xFEE
+
+// end-of-stream mode
+#define LZSS_EOSM_NONE		0x00
+#define LZSS_EOSM_REF0		0x01	// end with a "null-reference" (offset 0, length 0)
 
 
 LZSS_COMPR* lzssCreate(const LZSS_CFG* config);

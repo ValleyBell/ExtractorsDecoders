@@ -20,7 +20,7 @@ struct _lzss_compressor
 							   facilitate string comparison of longest match.
 							   These are set by the InsertNode() procedure. */
 	int match_position;
-	int match_length;
+	unsigned int match_length;
 	int* lson;				/* left & right children & parents -- These constitute binary search trees. */
 	int* rson;
 	int* dad;
@@ -61,6 +61,8 @@ void lzssGetDefaultConfig(LZSS_CFG* config)
 	config->nameTblValue = ' ';	// space
 	config->nameTblFunc = NULL;
 	config->ntFuncParam = NULL;
+	config->nameTblStartOfs = LZSS_NTSTOFS_NF;
+	config->eosMode = LZSS_EOSM_NONE;
 	return;
 }
 
@@ -93,7 +95,8 @@ static void InsertNode(LZSS_COMPR* lzss, int r)
 	   one, because the old one will be deleted sooner.
 	   Note r plays double role, as tree node and position in buffer. */
 {
-	int  i, p, cmp;
+	unsigned int i;
+	int  p, cmp;
 	uint8_t  *key;
 
 	cmp = 1;  key = &lzss->text_buf[r];  p = lzss->N + 1 + key[0];
@@ -106,11 +109,11 @@ static void InsertNode(LZSS_COMPR* lzss, int r)
 			if (lzss->lson[p] != lzss->NIL) p = lzss->lson[p];
 			else {  lzss->lson[p] = r;  lzss->dad[r] = p;  return;  }
 		}
-		for (i = 1; i < (int)lzss->F; i++)
+		for (i = 1; i < lzss->F; i++)
 			if ((cmp = key[i] - (int)lzss->text_buf[p + i]) != 0)  break;
 		if (i > lzss->match_length) {
 			lzss->match_position = p;
-			if ((lzss->match_length = i) >= (int)lzss->F)  break;
+			if ((lzss->match_length = i) >= lzss->F)  break;
 		}
 	}
 	lzss->dad[r] = lzss->dad[p];  lzss->lson[r] = lzss->lson[p];  lzss->rson[r] = lzss->rson[p];
@@ -144,19 +147,20 @@ static void DeleteNode(LZSS_COMPR* lzss, int p)  /* deletes node p from tree */
 static void InitNametable(LZSS_COMPR* lzss)
 {
 	if (lzss->cfg.nameTblType == LZSS_NTINIT_VALUE)
-		memset(lzss->text_buf, lzss->cfg.nameTblValue, lzss->N - lzss->F);
+		memset(lzss->text_buf, lzss->cfg.nameTblValue, lzss->N);
 	else if (lzss->cfg.nameTblType == LZSS_NTINIT_FUNC)
-		lzss->cfg.nameTblFunc(lzss, lzss->cfg.ntFuncParam, lzss->N - lzss->F, lzss->text_buf);
+		lzss->cfg.nameTblFunc(lzss, lzss->cfg.ntFuncParam, lzss->N, lzss->text_buf);
 	else
-		memset(lzss->text_buf, 0x00, lzss->N - lzss->F);
+		memset(lzss->text_buf, 0x00, lzss->N);
 }
 
 uint8_t lzssEncode(LZSS_COMPR* lzss, size_t bufSize, uint8_t* buffer, size_t* bytesWritten, size_t inSize, const uint8_t* inData)
 {
 	size_t codesize = 0;		/* code size counter */
 
-	int i, len, r, s, last_match_length, code_buf_ptr;
-	uint8_t code_buf[17];
+	unsigned int i, len, r, s, last_match_length, code_buf_ptr;
+	unsigned int maskN = lzss->N - 1;
+	uint8_t code_buf[17];	// control byte (1) + 8 reference words (16)
 	uint8_t mask;
 	size_t inPos;
 	size_t outPos;
@@ -181,16 +185,26 @@ uint8_t lzssEncode(LZSS_COMPR* lzss, size_t bufSize, uint8_t* buffer, size_t* by
 
 	inPos = 0;
 	outPos = 0;
-	s = 0;  r = lzss->N - lzss->F;
-	for (len = 0; len < (int)lzss->F && inPos < inSize; len++)
+	if (lzss->cfg.nameTblStartOfs == LZSS_NTSTOFS_NF)
+		r = lzss->N - lzss->F;
+	else
+		r = lzss->cfg.nameTblStartOfs & maskN;
+	s = (r + lzss->F) & maskN;
+	for (len = 0; len < lzss->F && inPos < inSize; len++)
 	{
 		uint8_t c = inData[inPos++];
-		lzss->text_buf[r + len] = c;  /* Read F bytes into the last F bytes of
+		lzss->text_buf[(r + len) & maskN] = c;  /* Read F bytes into the last F bytes of
 			the buffer */
 	}
-	if (lzss->cfg.nameTblType != LZSS_NTINIT_NONE)
+	memcpy(&lzss->text_buf[lzss->N], &lzss->text_buf[0], lzss->F - 1);	// for easy string comparison
+	if (lzss->cfg.nameTblType == LZSS_NTINIT_FUNC)
 	{
-		for (i = 1; i <= (int)lzss->F; i++) InsertNode(lzss, r - i);  /* Insert the F strings,
+		// build a tree so that the whole nametable is included
+		for (i = 1; i <= lzss->N - lzss->F; i++) InsertNode(lzss, (r + lzss->N - i) & maskN);
+	}
+	else if (lzss->cfg.nameTblType != LZSS_NTINIT_NONE)
+	{
+		for (i = 1; i <= lzss->F; i++) InsertNode(lzss, (r + lzss->N - i) & maskN);  /* Insert the F strings,
 			each of which begins with one or more 'space' characters.  Note
 			the order in which these strings are inserted.  This way,
 			degenerate trees will be less likely to occur. */
@@ -200,13 +214,13 @@ uint8_t lzssEncode(LZSS_COMPR* lzss, size_t bufSize, uint8_t* buffer, size_t* by
 	do {
 		if (lzss->match_length > len) lzss->match_length = len;  /* match_length
 			may be spuriously long near the end of text. */
-		if (lzss->match_length <= (int)lzss->THRESHOLD) {
+		if (lzss->match_length <= lzss->THRESHOLD) {
 			lzss->match_length = 1;  /* Not long enough match.  Send one byte. */
 			code_buf[0] |= mask;  /* 'send one byte' flag */
 			code_buf[code_buf_ptr++] = lzss->text_buf[r];  /* Send uncoded. */
 		} else {
 			/* Send position and length pair. Note match_length > THRESHOLD. */
-			int mlen = lzss->match_length - (lzss->THRESHOLD + 1);
+			unsigned int mlen = lzss->match_length - (lzss->THRESHOLD + 1);
 			uint8_t i, j;
 			switch(lzss->cfg.flags & LZSS_FLAGS_MTCH_LMASK)
 			{
@@ -265,17 +279,17 @@ uint8_t lzssEncode(LZSS_COMPR* lzss, size_t bufSize, uint8_t* buffer, size_t* by
 			DeleteNode(lzss, s);	/* Delete old strings and */
 			c = inData[inPos++];
 			lzss->text_buf[s] = c;	/* read new bytes */
-			if (s < (int)lzss->F - 1) lzss->text_buf[s + lzss->N] = c;  /* If the position is
+			if (s < lzss->F - 1) lzss->text_buf[s + lzss->N] = c;  /* If the position is
 				near the end of buffer, extend the buffer to make
 				string comparison easier. */
-			s = (s + 1) & (lzss->N - 1);  r = (r + 1) & (lzss->N - 1);
+			s = (s + 1) & maskN;  r = (r + 1) & maskN;
 				/* Since this is a ring buffer, increment the position
 				   modulo N. */
 			InsertNode(lzss, r);	/* Register the string in text_buf[r..r+F-1] */
 		}
 		while (i++ < last_match_length) {	/* After the end of text, */
 			DeleteNode(lzss, s);			/* no need to read, but */
-			s = (s + 1) & (lzss->N - 1);  r = (r + 1) & (lzss->N - 1);
+			s = (s + 1) & maskN;  r = (r + 1) & maskN;
 			if (--len) InsertNode(lzss, r);	/* buffer may not be empty. */
 		}
 	} while (len > 0);	/* until length of string to be processed is zero */
@@ -291,6 +305,30 @@ uint8_t lzssEncode(LZSS_COMPR* lzss, size_t bufSize, uint8_t* buffer, size_t* by
 		}
 		codesize += code_buf_ptr;
 	}
+	if (lzss->cfg.eosMode == LZSS_EOSM_REF0)
+	{
+		// add null-reference
+		if (code_buf_ptr > 1)
+		{
+			i = 1;		// just write the terminating reference word
+		}
+		else
+		{
+			code_buf[0] = 0;	// "reference flag" control byte
+			i = 0;	// write control byte + reference word
+		}
+		code_buf[1] = code_buf[2] = 0;	// reference word
+		code_buf_ptr = 3;
+		for (; i < code_buf_ptr; i++)
+		{
+			if (outPos >= bufSize)
+			{
+				if (bytesWritten != NULL) *bytesWritten = outPos;
+				return LZSS_ERR_EOF_OUT;
+			}
+			buffer[outPos++] = code_buf[i];
+		}
+	}
 
 	if (bytesWritten != NULL) *bytesWritten = outPos;
 	return LZSS_ERR_OK;
@@ -298,6 +336,7 @@ uint8_t lzssEncode(LZSS_COMPR* lzss, size_t bufSize, uint8_t* buffer, size_t* by
 
 uint8_t lzssDecode(LZSS_COMPR* lzss, size_t bufSize, uint8_t* buffer, size_t* bytesWritten, size_t inSize, const uint8_t* inData)
 {
+	unsigned int maskN = lzss->N - 1;
 	unsigned int r;	// ring buffer position
 	uint8_t flags;
 	unsigned int flag_bits;
@@ -306,7 +345,10 @@ uint8_t lzssDecode(LZSS_COMPR* lzss, size_t bufSize, uint8_t* buffer, size_t* by
 
 	InitNametable(lzss);
 
-	r = lzss->N - lzss->F;
+	if (lzss->cfg.nameTblStartOfs == LZSS_NTSTOFS_NF)
+		r = lzss->N - lzss->F;
+	else
+		r = lzss->cfg.nameTblStartOfs & maskN;
 	flags = 0;
 	flag_bits = 0;
 	inPos = 0;
@@ -350,7 +392,7 @@ uint8_t lzssDecode(LZSS_COMPR* lzss, size_t bufSize, uint8_t* buffer, size_t* by
 			c = inData[inPos++];
 			buffer[outPos++] = c;
 			lzss->text_buf[r++] = c;
-			r &= (lzss->N - 1);
+			r &= maskN;
 		} else {
 			uint8_t i, j;
 			unsigned int k, len, ofs;
@@ -371,6 +413,11 @@ uint8_t lzssDecode(LZSS_COMPR* lzss, size_t bufSize, uint8_t* buffer, size_t* by
 			{
 				j = inData[inPos+0];
 				i = inData[inPos+1];
+			}
+			if (lzss->cfg.eosMode == LZSS_EOSM_REF0)
+			{
+				if (i == 0 && j == 0)
+					break;	// null-reference ends the stream
 			}
 			inPos += 2;
 			switch(lzss->cfg.flags & LZSS_FLAGS_MTCH_LMASK)
@@ -396,7 +443,7 @@ uint8_t lzssDecode(LZSS_COMPR* lzss, size_t bufSize, uint8_t* buffer, size_t* by
 			len += lzss->THRESHOLD + 1;
 			if (lzss->cfg.nameTblType == LZSS_NTINIT_NONE)
 			{
-				unsigned int ofs_back = (r + lzss->N - ofs) & (lzss->N - 1);
+				unsigned int ofs_back = (r + lzss->N - ofs) & maskN;
 				if (ofs_back > outPos)	// make sure we don't reference data beyond the start of the file
 				{
 					if (bytesWritten != NULL) *bytesWritten = outPos;
@@ -406,7 +453,7 @@ uint8_t lzssDecode(LZSS_COMPR* lzss, size_t bufSize, uint8_t* buffer, size_t* by
 
 			for (k = 0; k < len; k++)
 			{
-				unsigned int offset = (ofs + k) & (lzss->N - 1);
+				unsigned int offset = (ofs + k) & maskN;
 				uint8_t c = lzss->text_buf[offset];
 				if (outPos >= bufSize)
 				{
@@ -415,7 +462,7 @@ uint8_t lzssDecode(LZSS_COMPR* lzss, size_t bufSize, uint8_t* buffer, size_t* by
 				}
 				buffer[outPos++] = c;
 				lzss->text_buf[r++] = c;
-				r &= (lzss->N - 1);
+				r &= maskN;
 			}
 		}
 	}
