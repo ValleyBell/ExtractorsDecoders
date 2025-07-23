@@ -146,11 +146,14 @@ X68000 S.P.S. Archive Unpacker
 
 Confirmed to work with:
 
-- Daimakaimura (TEXTDAT*.SLD)
+- Daimakaimura (TEXTDAT2.SLD, TEXTDAT4.SLD)
+- Final Fight (BGM.SLD, BGM_MIDI.SLD, *.BLK)
 - Street Fighter II: Champion Edition (FM.BLK, GM.BLK)
 - Super Street Fighter II: The New Challengers (FM.BLK, GM.BLK)
 
-Daimakaimura and SSF2 use mostly standard LZSS, but modified to use a BigEndian reference word and not requiring a 4 KB dictionary. (The extracted data is used as reference only.)
+Final Fight uses mostly standard LZSS, with BigEndian reference words and a 4 KB dictionary. (`lzss_tool -n 0 -C 1 -R 0x05`)
+
+Daimakaimura and SSF2 use mostly standard LZSS, but modified to use a BigEndian reference word and not requiring a 4 KB dictionary. Only the extracted data is referenced.
 
 Super Street Fighter II uses LZSS with modifications to how the reference word works. `SSF2_Compr.txt` contains a disassembly of its decompression code.
 
