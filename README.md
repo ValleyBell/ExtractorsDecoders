@@ -146,16 +146,27 @@ X68000 S.P.S. Archive Unpacker
 
 Confirmed to work with:
 
-- Daimakaimura (TEXTDAT2.SLD, TEXTDAT4.SLD)
-- Final Fight (BGM.SLD, BGM_MIDI.SLD, *.BLK)
-- Street Fighter II: Champion Edition (FM.BLK, GM.BLK)
-- Super Street Fighter II: The New Challengers (FM.BLK, GM.BLK)
+- Ajax (`MUSICS.AJX`)
+- Daimakaimura (`TEXTDAT2.SLD`, `TEXTDAT4.SLD`)
+- Final Fight (`BGM.SLD`, `BGM_MIDI.SLD`, `*.BLK`)
+- Street Fighter II: Champion Edition (`FM.BLK`, `GM.BLK`)
+- Super Street Fighter II: The New Challengers (`FM.BLK`, `GM.BLK`)
+- M2SEQ executables (`SEQMM.X` from Märchen Maze, `SEQWS.X` from Pro Yakyuu World Stadium)
 
-Final Fight uses mostly standard LZSS, with BigEndian reference words and a 4 KB dictionary. (`lzss_tool -n 0 -C 1 -R 0x05`)
+Notes about SF2/SSF2 BLK files:
 
-Daimakaimura and SSF2 use mostly standard LZSS, but modified to use a BigEndian reference word and not requiring a 4 KB dictionary. Only the extracted data is referenced.
+- The tool can extract all BLK files from those games, but the auto-detection of the compression format will likely be wrong.
+- Some BLK files contain uncompressed data (e.g. BLK files containing ADPCM sounds).
+  For others you will need to explicitly specify the game's compression type using the `-c` parameter.
 
-Super Street Fighter II uses LZSS with modifications to how the reference word works. `SSF2_Compr.txt` contains a disassembly of its decompression code.
+Notes about S.P.S compression formats:
+
+- Final Fight uses standard LZSS, with BigEndian reference words and a 4 KB dictionary. (`lzss_tool -n 0 -C 1 -R 0x05`)
+- Daimakaimura and SF2CE use mostly standard LZSS, but modified to use a BigEndian reference word and not requiring a 4 KB dictionary. Only the extracted data is referenced.
+- Super Street Fighter II uses LZSS with modifications to how the reference word works. `SSF2_Compr.txt` contains a disassembly of its decompression code.
+
+The source code of the tool contains detailed notes about how the respective archive formats works. (Most of them are just simple lists of file offsets or sizes.)
+It is really annoying that almost every game uses a unique archive format.
 
 ## xordec
 

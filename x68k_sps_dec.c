@@ -3,9 +3,26 @@
 // Valley Bell, written on 2017-09-01 (Street Fighter II: Champion Edition)
 // updated on 2017-09-02 (Daimakaimura)
 // updated on 2017-09-03 (Super Street Fighter II: The New Challengers)
+// updated on 2025-07-23 (Final Fight)
+// updated on 2025-07-25 (Ajax)
+// updated on 2025-07-27 (M2SEQ)
 // based on Twinkle Soft Decompressor
 
-// BLK v1 format
+// BLK AJX format
+// --------------
+// Format:
+//  repeat N times:
+//      2 bytes - start offset of file # (Big Endian)
+//  This is just a list of N file offsets.
+//
+// Note: Some archives seem end the offset list with a pointer to offset 0.
+// However this doesn't seem to apply to all archives.
+//
+// Games:
+// - Ajax
+//      MUSICS.AJX
+
+// BLK FF format
 // -------------
 // Format:
 //  repeat N times:
@@ -21,8 +38,8 @@
 // - Final Fight
 //      PCM_COMM.BLK / STAGE?.BLK
 
-// BLK v2 format
-// -------------
+// BLK SF2 format
+// --------------
 // Format:
 //  repeat N times:
 //      4 bytes - file offset (Big Endian)
@@ -36,7 +53,7 @@
 // - Super Street Fighter II: The New Challengers BLK format
 //      FM.BLK / GM.BLK - compressed with LZSS_SPS_V3
 
-// SLD v1 format
+// SLD FF format
 // -------------
 // The whole file is compressed with LZSS_SPS_V1 - this includes the archive header.
 // Before reading the header, the file has to be decompressed in its entirety first.
@@ -46,7 +63,7 @@
 // - Final Fight
 //      BGM.SLD / BGM_MIDI.SLD
 
-// SLD v2 format
+// SLD DM format
 // -------------
 // Format:
 //  repeat N times:
@@ -58,6 +75,51 @@
 // Games:
 // - Daimakaimura
 //      TEXTDAT2.SLD / TEXTDAT4.SLD - compressed with LZSS_SPS_V2
+
+// M2SEQ executables
+// -----------------
+// These are usual Human68k Xfile executables. They start with a "HU" file signature and the payload data starts at 0x40.
+//
+// M2SEQ executables have the magic string "M2SEQ" at the beginning of the data.
+// The general layout is:
+//  - driver code
+//  - sequence data (each song consists of a single "track" that uses multiple MIDI channels)
+//  - "driver base address"
+//  - working RAM
+//  - song pointer list
+//  - additional code
+//  - text strings
+//
+// The "driver base" offset is loaded using the following 68000 instructions:
+//      48E7 080E       MOVEM.L D4/A4-A6, -(SP)
+//      4DF9 xxxx xxxx  LEA     $xxxxx.L, A6    ; load driver main offset
+//
+// Song loading differs per-game:
+//  song load: (Marchen Maze)
+//      302E 0058       MOVE.W  $58(A6), D0
+//      0C40 001E       CMPI.W  #$1E, D0        ; 1E = song count
+//      644E            BCC     exit            ; invalid song - exit
+//      E548            LSL.W   #2, D0
+//      41EE 00AC       LEA     $AC(A6), A0     ; -> offset for music pointer list
+//      2870 0000       MOVEA.L (A0,D0.W), A4
+//  
+//  song load: (Pro Yakyuu World Stadium)
+//      102E 0062       MOVE.B  $62(A6), D0
+//      0C40 0034       CMPI.W  #$34, D0        ; 34 = song count
+//      6400 004E       BCC     exit            ; invalid song - exit
+//      E548            LSL.W   #2, D0
+//      41EE 00A6       LEA     $A6(A6), A0     ; -> offset for music pointer list
+//      2030 0000       MOVE.L  (A0,D0.W), D0
+//
+// A sort of reliable way for auto-detection this should be to search for "E548 41EE 00" (LSL #2, LEA)
+// and expect the song count check (CMP.W) within 0x10 bytes before.
+//
+// Games:
+// - Marchen Maze
+//      SEQMM.X
+// - Pro Yakyuu World Stadium
+//      SEQWS.X
+
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -73,13 +135,28 @@
 #endif
 
 
+typedef struct _type_name_item
+{
+	UINT8 type;
+	const char* shortName;
+	const char* longName;
+} TN_ITEM;
+
+
+static const TN_ITEM* GetNameListByType(const TN_ITEM* tnList, UINT8 type);
+static const TN_ITEM* GetNameListByName(const TN_ITEM* tnList, const char* name);
+static void PrintShortNameList(const TN_ITEM* tnList);
+static void GenerateFileName(char* buffer, const char* fileExt, UINT32 fileNum);
 static UINT8 WriteFileData(UINT32 dataLen, const UINT8* data, const char* fileName);
 static void DecompressFile(UINT32 inSize, const UINT8* inData, const char* fileName);
-static void FormatDetection(UINT32 arcSize, const UINT8* arcData, const char* arcName);
-static void ExtractBLKv1Archive(UINT32 arcSize, const UINT8* arcData, const char* fileName);
-static void ExtractBLKv2Archive(UINT32 arcSize, const UINT8* arcData, const char* fileName);
-static void ExtractSLDv1Archive(UINT32 arcSize, const UINT8* arcData, const char* fileName);
-static void ExtractSLDv2Archive(UINT32 arcSize, const UINT8* arcData, const char* fileName);
+static void FormatDetection(UINT32 arcSize, const UINT8* arcData);
+static UINT32 FindPattern2(UINT32 dataLen, const UINT8* data, UINT32 matchLen, const UINT8* matchData, UINT32 startPos);
+static void ExtractBLK_AJX_Archive(UINT32 arcSize, const UINT8* arcData, const char* fileName);
+static void ExtractBLK_FF_Archive(UINT32 arcSize, const UINT8* arcData, const char* fileName);
+static void ExtractBLK_SF2_Archive(UINT32 arcSize, const UINT8* arcData, const char* fileName);
+static void ExtractSLD_FF_Archive(UINT32 arcSize, const UINT8* arcData, const char* fileName);
+static void ExtractSLD_DM_Archive(UINT32 arcSize, const UINT8* arcData, const char* fileName);
+static void ExtractM2SEQ_Archive(UINT32 arcSize, const UINT8* arcData, const char* fileName);
 static UINT32 LZSS_Decode_v1(UINT32 inLen, const UINT8* inData, UINT32 outLen, UINT8* outData);
 static UINT32 LZSS_Decode_v2(UINT32 inLen, const UINT8* inData, UINT32 outLen, UINT8* outData);
 static UINT32 LZSS_Decode_v3(UINT32 inLen, const UINT8* inData, UINT32 outLen, UINT8* outData);
@@ -88,10 +165,12 @@ static UINT32 ReadBE32(const UINT8* Data);
 
 
 #define ARC_AUTO		0xFF
-#define ARC_BLK_V1		0x00
-#define ARC_BLK_V2		0x01
-#define ARC_SLD_V1		0x02
-#define ARC_SLD_V2		0x03
+#define ARC_BLK_AJX		0x00
+#define ARC_BLK_FF		0x01
+#define ARC_BLK_SF2		0x02
+#define ARC_SLD_FF		0x10
+#define ARC_SLD_DM		0x11
+#define ARC_M2SEQ		0x20
 
 #define LZSS_AUTO		0xFF	// automatic detection
 #define LZSS_NONE		0x00	// no compression
@@ -99,24 +178,33 @@ static UINT32 ReadBE32(const UINT8* Data);
 #define LZSS_SPS_V2		0x02	// Daimakaimura, Street Fighter II: CE
 #define LZSS_SPS_V3		0x03	// Super Street Fighter II: TNC
 
-static const char* ARCHIVE_STRS[] =
+static TN_ITEM ARCHIVE_FMTS[] =
 {
-	"BLK v1",
-	"BLK v2",
-	"SLD v1",
-	"SLD v2",
+	{ARC_AUTO,      "auto",     "auto"},
+	{ARC_BLK_AJX,   "BLK-AJX",  "BLK Ajax"},
+	{ARC_BLK_FF,    "BLK-FF",   "BLK Final Fight"},
+	{ARC_BLK_SF2,   "BLK-SF2",  "BLK Street Fighter 2"},
+	{ARC_SLD_FF,    "SLD-FF",   "SLD Final Fight"},
+	{ARC_SLD_DM,    "SLD-DM",   "SLD Daimakaimura"},
+	{ARC_M2SEQ,     "M2SEQ",    "M2system sequencer"},
+	{0xFF,          NULL,       NULL},
 };
 
-static const char* COMPR_STRS[] =
+static TN_ITEM COMPR_FMTS[] =
 {
-	"none",
-	"LZSS-SPS v1",
-	"LZSS-SPS v2",
-	"LZSS-SPS v3",
+	{LZSS_AUTO,     "auto", "auto"},
+	{LZSS_NONE,     "none", "none"},
+	{LZSS_SPS_V1,   "LS1",  "LZSS-SPS v1",},
+	{LZSS_SPS_V2,   "LS2",  "LZSS-SPS v2",},
+	{LZSS_SPS_V3,   "LS3",  "LZSS-SPS v3",},
+	{0xFF,          NULL,   NULL},
 };
 
-static UINT8 ArchiveType;
-static UINT8 ComprType;
+static UINT8 ArchiveType = ARC_AUTO;
+static UINT8 ComprType = LZSS_AUTO;
+static UINT8 ExtractDupes = 0;
+static char PatOut_NumType = 'x';
+static int PatOut_Base = 0;
 
 int main(int argc, char* argv[])
 {
@@ -129,62 +217,88 @@ int main(int argc, char* argv[])
 	if (argc < 3)
 	{
 		printf("Usage: x68k_sps_dec.exe [Options] input.blk output.bin\n");
-		printf("This will create files output_00.bin, output_01.bin, etc.\n");
+		printf("This will create files output00.bin, output01.bin, etc.\n");
 		printf("\n");
 		printf("Options:\n");
-		printf("    -s  SLD v1 archive\n");
-		printf("    -S  SLD v2 archive\n");
-		printf("    -b  BLK v1 archive\n");
-		printf("    -B  BLK v2 archive\n");
-		printf("    -r  extract raw data\n");
-		printf("    -1  decompress using LZSS-SPS variant 1\n");
-		printf("    -2  decompress using LZSS-SPS variant 2\n");
-		printf("    -3  decompress using LZSS-SPS variant 3\n");
+		printf("    -f fmt  specify archive format, must be one of:\n");
+		printf("            "); PrintShortNameList(ARCHIVE_FMTS); printf("\n");
+		printf("    -c fmt  specify compression format, must be one of:\n");
+		printf("            "); PrintShortNameList(COMPR_FMTS); printf("\n");
+		printf("    -d      extract duplicate files\n");
+		printf("    -p N#   pattern mode for output file names\n");
+		printf("            N = number type: 'd' (decimal) / 'x' (hexadecimal, default)\n");
+		printf("            # = counting base: 0 or 1\n");
+		printf("    Name matching is case insensitive.\n");
 		printf("\n");
 		printf("Supported games:\n");
-		printf("    Daimakaimura (SLD v2 archive, LZSS v2)\n");
-		printf("    Final Fight (SLD v1/BLK v1 archive, LZSS v1)\n");
-		printf("    Street Fighter II: Champion Edition (BLK v2 archive, LZSS v2)\n");
-		printf("    Super Street Fighter II: The New Challengers (BLK v2 archive, LZSS v3)\n");
+		printf("    Ajax (BLK-AJX archive, uncompressed)\n");
+		printf("    Daimakaimura (SLD-DM archive, LZSS v2)\n");
+		printf("    Final Fight (SLD-FF/BLK-FF archive, LZSS v1)\n");
+		printf("    Street Fighter II: Champion Edition (BLK-SF2 archive, LZSS v2)\n");
+		printf("    Super Street Fighter II: The New Challengers (BLK-SF2 archive, LZSS v3)\n");
 		return 0;
 	}
 	
-	ArchiveType = ARC_AUTO;
-	ComprType = LZSS_AUTO;
 	argbase = 1;
 	while(argbase < argc && argv[argbase][0] == '-')
 	{
-		if (argv[argbase][1] == 's')
+		if (argv[argbase][1] == 'f')
 		{
-			ArchiveType = ARC_SLD_V2;
+			argbase ++;
+			if (argbase < argc)
+			{
+				const TN_ITEM* tni = GetNameListByName(ARCHIVE_FMTS, argv[argbase]);
+				if (tni == NULL)
+				{
+					printf("Unknown archive format: %s\n", argv[argbase]);
+					return 1;
+				}
+				ArchiveType = tni->type;
+			}
 		}
-		else if (argv[argbase][1] == 'b')
+		else if (argv[argbase][1] == 'c')
 		{
-			ArchiveType = ARC_BLK_V2;
+			argbase ++;
+			if (argbase < argc)
+			{
+				const TN_ITEM* tni = GetNameListByName(COMPR_FMTS, argv[argbase]);
+				if (tni == NULL)
+				{
+					printf("Unknown compression type: %s\n", argv[argbase]);
+					return 1;
+				}
+				ComprType = tni->type;
+			}
 		}
-		else if (argv[argbase][1] == 'S')
+		else if (argv[argbase][1] == 'd')
 		{
-			ArchiveType = ARC_SLD_V2;
+			ExtractDupes = 1;
 		}
-		else if (argv[argbase][1] == 'B')
+		else if (argv[argbase][1] == 'p')
 		{
-			ArchiveType = ARC_BLK_V2;
-		}
-		else if (argv[argbase][1] == 'r')
-		{
-			ComprType = LZSS_NONE;
-		}
-		else if (argv[argbase][1] == '1')
-		{
-			ComprType = LZSS_SPS_V1;
-		}
-		else if (argv[argbase][1] == '2')
-		{
-			ComprType = LZSS_SPS_V2;
-		}
-		else if (argv[argbase][1] == '3')
-		{
-			ComprType = LZSS_SPS_V3;
+			argbase ++;
+			if (argbase < argc)
+			{
+				char* endPtr = NULL;
+				char numType = argv[argbase][0];
+				int numBase;
+				if (numType == 'd' || numType == 'D' || numType == 'x' || numType == 'X')
+				{
+					PatOut_NumType = numType;
+				}
+				else
+				{
+					printf("Invalid number type: %c\n", numType);
+					return 1;
+				}
+				numBase = (int)strtol(&argv[argbase][1], &endPtr, 10);
+				if (endPtr == &argv[argbase][1])
+				{
+					printf("Invalid counting base: %s\n", &argv[argbase][1]);
+					return 1;
+				}
+				PatOut_Base = numBase;
+			}
 		}
 		else
 			break;
@@ -198,7 +312,10 @@ int main(int argc, char* argv[])
 	
 	hFile = fopen(argv[argbase + 0], "rb");
 	if (hFile == NULL)
+	{
+		printf("Error opening %s!\n", argv[argbase + 0]);
 		return 1;
+	}
 	
 	fseek(hFile, 0, SEEK_END);
 	inLen = ftell(hFile);
@@ -212,34 +329,86 @@ int main(int argc, char* argv[])
 	fclose(hFile);
 	
 	if (ArchiveType == ARC_AUTO)
-		FormatDetection(inLen, inData, argv[argbase + 0]);
+		FormatDetection(inLen, inData);	// will adjust ArchiveType according to the detection
 	if (ArchiveType == ARC_AUTO)
 	{
 		printf("Unknown archive type! Please specify the archive type manually\n");
 		free(inData);
 		return 2;
 	}
-	printf("Archive format: %s\n", ARCHIVE_STRS[ArchiveType]);
+	printf("Archive format: %s\n", GetNameListByType(ARCHIVE_FMTS, ArchiveType)->longName);
 	
 	switch(ArchiveType)
 	{
-	case ARC_BLK_V1:
-		ExtractBLKv1Archive(inLen, inData, argv[argbase + 1]);
+	case ARC_BLK_AJX:
+		ExtractBLK_AJX_Archive(inLen, inData, argv[argbase + 1]);
 		break;
-	case ARC_BLK_V2:
-		ExtractBLKv2Archive(inLen, inData, argv[argbase + 1]);
+	case ARC_BLK_FF:
+		ExtractBLK_FF_Archive(inLen, inData, argv[argbase + 1]);
 		break;
-	case ARC_SLD_V1:
-		ExtractSLDv1Archive(inLen, inData, argv[argbase + 1]);
+	case ARC_BLK_SF2:
+		ExtractBLK_SF2_Archive(inLen, inData, argv[argbase + 1]);
 		break;
-	case ARC_SLD_V2:
-		ExtractSLDv2Archive(inLen, inData, argv[argbase + 1]);
+	case ARC_SLD_FF:
+		ExtractSLD_FF_Archive(inLen, inData, argv[argbase + 1]);
+		break;
+	case ARC_SLD_DM:
+		ExtractSLD_DM_Archive(inLen, inData, argv[argbase + 1]);
+		break;
+	case ARC_M2SEQ:
+		ExtractM2SEQ_Archive(inLen, inData, argv[argbase + 1]);
 		break;
 	}
 	
 	free(inData);
 	
 	return 0;
+}
+
+static const TN_ITEM* GetNameListByType(const TN_ITEM* tnList, UINT8 type)
+{
+	for (; tnList->shortName != NULL; tnList ++)
+	{
+		if (tnList->type == type)
+			return tnList;
+	}
+	return NULL;
+}
+
+static const TN_ITEM* GetNameListByName(const TN_ITEM* tnList, const char* name)
+{
+	for (; tnList->shortName != NULL; tnList ++)
+	{
+		if (!stricmp(tnList->shortName, name))
+			return tnList;
+	}
+	return NULL;
+}
+
+static void PrintShortNameList(const TN_ITEM* tnList)
+{
+	if (tnList == NULL)
+		return;
+	
+	printf("%s", tnList->shortName);	tnList ++;
+	for (; tnList->shortName != NULL; tnList ++)
+		printf(", %s", tnList->shortName);
+	return;
+}
+
+static void GenerateFileName(char* buffer, const char* fileExt, UINT32 fileNum)
+{
+	int outNum = PatOut_Base + (int)fileNum;
+	// generate file name (ABC.ext -> ABC00.ext)
+	// (using separate sprintf commands to avoid warnings due to user-defined format strings)
+	if (PatOut_NumType == 'x')
+		sprintf(buffer, "%02x%s", outNum, fileExt);
+	else if (PatOut_NumType == 'X')
+		sprintf(buffer, "%02X%s", outNum, fileExt);
+	else
+		sprintf(buffer, "%02d%s", outNum, fileExt);
+	
+	return;
 }
 
 static UINT8 WriteFileData(UINT32 dataLen, const UINT8* data, const char* fileName)
@@ -295,29 +464,58 @@ static void DecompressFile(UINT32 inSize, const UINT8* inData, const char* fileN
 	return;
 }
 
-static void FormatDetection(UINT32 arcSize, const UINT8* arcData, const char* arcName)
+static void FormatDetection(UINT32 arcSize, const UINT8* arcData)
 {
+	// Note: The detections here are sorted by reliability. More reliable ones are checked earlier.
+	
+	{	// M2SEQ detection
+		if (arcSize >= 0x50)
+		{
+			if (!memcmp(&arcData[0x00], "HU", 2) && !memcmp(&arcData[0x40], "M2SEQ", 5))
+			{
+				ArchiveType = ARC_M2SEQ;
+				return;
+			}
+		}
+	}
+	
 	{	// BLK v1/v2 detection
 		UINT32 val1 = ReadBE32(&arcData[0x00]);
 		UINT32 val2 = ReadBE32(&arcData[0x04]);
 		UINT32 val3 = ReadBE32(&arcData[0x08]);
 		
+		// offset 1, size 1, offset 2, ...
 		if (val1 + val2 == val3)
 		{
-			ArchiveType = ARC_BLK_V2;
+			ArchiveType = ARC_BLK_SF2;
 			return;
 		}
-		if (val1 < 0x01000 && val2 < 0x1000 && val3 < 0x1000)
+		// offset 1, offset 2, offset 3, ... (strictly monotonically increasing)
+		if (val1 < 0x01000 && (val2 > val1 && val2 < 0x1000) && (val3 > val2 && val3 < 0x1000))
 		{
-			ArchiveType = ARC_BLK_V1;
+			ArchiveType = ARC_BLK_FF;
 			return;
 		}
 	}
 	
 	{	// SLD v1 detection
+		// LZSS compression control bytes
 		if (arcData[0x00] == 0x7F && arcData[0x01] == 0xF0)
 		{
-			ArchiveType = ARC_SLD_V1;
+			ArchiveType = ARC_SLD_FF;
+			return;
+		}
+	}
+	
+	{	// AJX detection
+		UINT32 val1 = ReadBE16(&arcData[0x00]);
+		UINT32 val2 = ReadBE16(&arcData[0x02]);
+		UINT32 val3 = ReadBE16(&arcData[0x04]);
+		
+		// offset 1, offset 2, offset 3, ... (strictly monotonically increasing)
+		if (val1 < 0x0100 && (val2 > val1 && val2 < arcSize) && (val3 > val2 && val3 < arcSize))
+		{
+			ArchiveType = ARC_BLK_AJX;
 			return;
 		}
 	}
@@ -328,6 +526,7 @@ static void FormatDetection(UINT32 arcSize, const UINT8* arcData, const char* ar
 		for (curPos = 0x00; curPos < 0x10; curPos += 0x02)
 		{
 			UINT16 ptr = ReadBE16(&arcData[curPos]);
+			// list of sizes
 			if (ptr > 0x4000 || ptr <= 1)
 			{
 				isGood = 0;
@@ -336,27 +535,30 @@ static void FormatDetection(UINT32 arcSize, const UINT8* arcData, const char* ar
 		}
 		if (isGood)
 		{
-			ArchiveType = ARC_SLD_V2;
+			ArchiveType = ARC_SLD_DM;
 			return;
-		}
-	}
-	
-	{
-		const char* fileExt = strrchr(arcName, '.');
-		if (fileExt != NULL)
-		{
-			fileExt ++;
-			if (! stricmp(fileExt, "BLK"))
-				ArchiveType = ARC_BLK_V2;
-			else if (! stricmp(fileExt, "SLD"))
-				ArchiveType = ARC_SLD_V2;
 		}
 	}
 	
 	return;
 }
 
-static void ExtractBLKv1Archive(UINT32 arcSize, const UINT8* arcData, const char* fileName)
+static UINT32 FindPattern2(UINT32 dataLen, const UINT8* data, UINT32 matchLen, const UINT8* matchData, UINT32 startPos)
+{
+	UINT32 curPos;
+	
+	if (dataLen < matchLen)
+		return (UINT32)-1;
+	for (curPos = startPos; curPos < dataLen - matchLen; curPos += 0x02)
+	{
+		if (! memcmp(data + curPos, matchData, matchLen))
+			return curPos;
+	}
+	
+	return (UINT32)-1;
+}
+
+static void ExtractBLK_AJX_Archive(UINT32 arcSize, const UINT8* arcData, const char* fileName)
 {
 	const char* fileExt;
 	char* outName;
@@ -367,6 +569,78 @@ static void ExtractBLKv1Archive(UINT32 arcSize, const UINT8* arcData, const char
 	UINT32 curFile;
 	UINT32 arcPos;
 	UINT32 dataPos;
+	UINT32 lastPos;
+	UINT32 tempPos;
+	
+	// detect number of files
+	fileCnt = 0;
+	dataPos = arcSize;
+	for (arcPos = 0x00; arcPos < dataPos; arcPos += 0x02, fileCnt ++)
+	{
+		filePos = ReadBE16(&arcData[arcPos + 0x00]);
+		if (! filePos)
+			break;
+		if (filePos < dataPos)
+			dataPos = filePos;
+	}
+	printf("Files: %u\n", fileCnt);
+	
+	fileExt = strrchr(fileName, '.');
+	if (fileExt == NULL)
+		fileExt = fileName + strlen(fileName);
+	outName = (char*)malloc(strlen(fileName) + 0x10);
+	strcpy(outName, fileName);
+	outExt = outName + (fileExt - fileName);
+	
+	// extract everything
+	arcPos = 0x00;
+	lastPos = 0x00;
+	for (curFile = 0; curFile < fileCnt; curFile ++, arcPos += 0x02)
+	{
+		filePos = ReadBE16(&arcData[arcPos + 0x00]);
+		fileSize = 0x00;
+		if (filePos)
+		{
+			for (tempPos = arcPos + 0x02; tempPos < dataPos; tempPos += 0x02)
+			{
+				// search for next non-zero, non-duplicate pointer in a sparse list
+				fileSize = ReadBE16(&arcData[tempPos]);
+				if (fileSize && fileSize != filePos)
+					break;
+			}
+			if (fileSize <= filePos || fileSize > arcSize)
+				fileSize = arcSize;
+			fileSize -= filePos;
+		}
+		
+		GenerateFileName(outExt, fileExt, curFile);
+		
+		printf("File %u/%u - pos 0x%06X, len 0x%04X", 1 + curFile, fileCnt, filePos, fileSize);
+		if (filePos == lastPos && !ExtractDupes)
+			printf("    duplicate file - skipping");
+		else if (!filePos || filePos > arcSize || (filePos == arcSize && fileSize > 0))
+			printf("    Bad start offset - ignoring!");
+		else
+			WriteFileData(fileSize, &arcData[filePos], outName);
+		printf("\n");
+		lastPos = filePos;
+	}
+	
+	return;
+}
+
+static void ExtractBLK_FF_Archive(UINT32 arcSize, const UINT8* arcData, const char* fileName)
+{
+	const char* fileExt;
+	char* outName;
+	char* outExt;
+	UINT32 filePos;
+	UINT32 fileSize;
+	UINT32 fileCnt;
+	UINT32 curFile;
+	UINT32 arcPos;
+	UINT32 dataPos;
+	UINT32 lastPos;
 	UINT32 tempPos;
 	
 	// detect number of files
@@ -380,6 +654,7 @@ static void ExtractBLKv1Archive(UINT32 arcSize, const UINT8* arcData, const char
 		if (filePos < dataPos)
 			dataPos = filePos;
 	}
+	printf("Files: %u\n", fileCnt);
 	
 	fileExt = strrchr(fileName, '.');
 	if (fileExt == NULL)
@@ -390,25 +665,42 @@ static void ExtractBLKv1Archive(UINT32 arcSize, const UINT8* arcData, const char
 	
 	// extract everything
 	arcPos = 0x00;
+	lastPos = 0x00;
 	for (curFile = 0; curFile < fileCnt; curFile ++, arcPos += 0x04)
 	{
 		filePos = ReadBE32(&arcData[arcPos + 0x00]);
-		tempPos = ReadBE32(&arcData[arcPos + 0x04]);
-		if (arcPos + 0x04 >= dataPos || tempPos == 0 || tempPos == filePos)
-			tempPos = arcSize;
-		fileSize = tempPos - filePos;
+		fileSize = 0x00;
+		if (filePos)
+		{
+			for (tempPos = arcPos + 0x04; tempPos < dataPos; tempPos += 0x04)
+			{
+				// search for next non-zero, non-duplicate pointer in a sparse list
+				fileSize = ReadBE32(&arcData[tempPos]);
+				if (fileSize && fileSize != filePos)
+					break;
+			}
+			if (fileSize <= filePos || fileSize > arcSize)
+				fileSize = arcSize;
+			fileSize -= filePos;
+		}
 		
-		// generate file name(ABC.ext -> ABC_00.ext)
-		sprintf(outExt, "_%02X%s", curFile, fileExt);
+		GenerateFileName(outExt, fileExt, curFile);
 		
-		printf("file %u/%u - pos 0x%06X, len 0x%04X\n", 1 + curFile, fileCnt, filePos, fileSize);
-		WriteFileData(fileSize, &arcData[filePos], outName);
+		printf("File %u/%u - pos 0x%06X, len 0x%04X", 1 + curFile, fileCnt, filePos, fileSize);
+		if (filePos == lastPos && !ExtractDupes)
+			printf("    duplicate file - skipping");
+		else if (!filePos || filePos > arcSize || (filePos == arcSize && fileSize > 0))
+			printf("    Bad start offset - ignoring!");
+		else
+			WriteFileData(fileSize, &arcData[filePos], outName);
+		printf("\n");
+		lastPos = filePos;
 	}
 	
 	return;
 }
 
-static void ExtractBLKv2Archive(UINT32 arcSize, const UINT8* arcData, const char* fileName)
+static void ExtractBLK_SF2_Archive(UINT32 arcSize, const UINT8* arcData, const char* fileName)
 {
 	const char* fileExt;
 	char* outName;
@@ -438,6 +730,7 @@ static void ExtractBLKv2Archive(UINT32 arcSize, const UINT8* arcData, const char
 		if (filePos < arcSize)
 			firstByte &= arcData[filePos];
 	}
+	printf("Files: %u\n", fileCnt);
 	if (ComprType == LZSS_AUTO)
 	{
 		if (firstByte == 0xFF)
@@ -447,7 +740,7 @@ static void ExtractBLKv2Archive(UINT32 arcSize, const UINT8* arcData, const char
 		else
 			ComprType = LZSS_NONE;
 	}
-	printf("Compression: %s\n", COMPR_STRS[ComprType]);
+	printf("Compression: %s\n", GetNameListByType(COMPR_FMTS, ComprType)->longName);
 	
 	fileExt = strrchr(fileName, '.');
 	if (fileExt == NULL)
@@ -463,37 +756,40 @@ static void ExtractBLKv2Archive(UINT32 arcSize, const UINT8* arcData, const char
 		filePos = ReadBE32(&arcData[arcPos + 0x00]);
 		fileSize = ReadBE32(&arcData[arcPos + 0x04]);
 		
-		// generate file name(ABC.ext -> ABC_00.ext)
-		sprintf(outExt, "_%02X%s", curFile, fileExt);
+		GenerateFileName(outExt, fileExt, curFile);
 		
-		printf("file %u/%u - pos 0x%06X, len 0x%04X\n", 1 + curFile, fileCnt, filePos, fileSize);
-		DecompressFile(fileSize, &arcData[filePos], outName);
+		printf("File %u/%u - pos 0x%06X, len 0x%04X", 1 + curFile, fileCnt, filePos, fileSize);
+		if (!filePos || filePos > arcSize || (filePos == arcSize && fileSize > 0))
+			printf("    Bad start offset - ignoring!");
+		else
+			DecompressFile(fileSize, &arcData[filePos], outName);
+		printf("\n");
 	}
 	
 	return;
 }
 
-static void ExtractSLDv1Archive(UINT32 arcSize, const UINT8* arcData, const char* fileName)
+static void ExtractSLD_FF_Archive(UINT32 arcSize, const UINT8* arcData, const char* fileName)
 {
 	UINT32 decSize;
 	UINT8* decBuffer;
 	UINT32 outSize;
 	
-	printf("Compression: %s\n", COMPR_STRS[LZSS_SPS_V1]);
+	printf("Compression: %s\n", GetNameListByType(COMPR_FMTS, LZSS_SPS_V1)->longName);
 	decSize = arcSize * 8;
 	decBuffer = (UINT8*)malloc(decSize);
 	outSize = LZSS_Decode_v1(arcSize, arcData, decSize, decBuffer);
 	if (outSize >= decSize)
 		printf("Warning - not all data was decompressed!\n");
 	
-	ExtractBLKv1Archive(outSize, decBuffer, fileName);
+	ExtractBLK_FF_Archive(outSize, decBuffer, fileName);
 	
 	free(decBuffer);	decBuffer = NULL;
 	
 	return;
 }
 
-static void ExtractSLDv2Archive(UINT32 arcSize, const UINT8* arcData, const char* fileName)
+static void ExtractSLD_DM_Archive(UINT32 arcSize, const UINT8* arcData, const char* fileName)
 {
 	const char* fileExt;
 	char* outName;
@@ -521,10 +817,11 @@ static void ExtractSLDv2Archive(UINT32 arcSize, const UINT8* arcData, const char
 	}
 	if (arcPos + filePos < arcSize)
 		fileCnt ++;	// try to also extract additional data
+	printf("Files: %u\n", fileCnt);
 	
 	if (ComprType == LZSS_AUTO)
 		ComprType = LZSS_SPS_V2;
-	printf("Compression: %s\n", COMPR_STRS[ComprType]);
+	printf("Compression: %s\n", GetNameListByType(COMPR_FMTS, ComprType)->longName);
 	
 	fileExt = strrchr(fileName, '.');
 	if (fileExt == NULL)
@@ -545,12 +842,130 @@ static void ExtractSLDv2Archive(UINT32 arcSize, const UINT8* arcData, const char
 		if (filePos + fileSize > arcSize)
 			fileSize = arcSize - filePos;
 		
-		// generate file name(ABC.ext -> ABC_00.ext)
-		sprintf(outExt, "_%02X%s", curFile, fileExt);
+		GenerateFileName(outExt, fileExt, curFile);
 		
-		printf("file %u/%u - pos 0x%06X, len 0x%04X\n", 1 + curFile, fileCnt, filePos, fileSize);
-		DecompressFile(fileSize, &arcData[filePos], outName);
+		printf("File %u/%u - pos 0x%06X, len 0x%04X", 1 + curFile, fileCnt, filePos, fileSize);
+		if (filePos > arcSize || (filePos == arcSize && fileSize > 0))
+			printf("    Bad start offset - ignoring!");
+		else
+			DecompressFile(fileSize, &arcData[filePos], outName);
+		printf("\n");
 		filePos += fileSize;
+	}
+	
+	return;
+}
+
+static void ExtractM2SEQ_Archive(UINT32 arcSize, const UINT8* arcData, const char* fileName)
+{
+	static const UINT8 MAGIC_DRVBASE[] = {0x48, 0xE7, 0x08, 0x0E, 0x4D, 0xF9};
+	static const UINT8 MAGIC_SONGLOAD[] = {0xE5, 0x48, 0x41, 0xEE, 0x00};
+	const char* fileExt;
+	char* outName;
+	char* outExt;
+	UINT32 drvBase;
+	UINT32 songLoadPos;
+	UINT32 tocPos;
+	UINT32 filePos;
+	UINT32 fileSize;
+	UINT32 fileCnt;
+	UINT32 curFile;
+	UINT32 arcPos;
+	UINT32 endPos;
+	UINT32 lastPos;
+	UINT32 tempPos;
+	
+	if (arcSize < 0x40)
+		return;
+	arcData = &arcData[0x40];	arcSize -= 0x40;	// strip Human68k Xfile header
+	
+	drvBase = FindPattern2(arcSize, arcData, sizeof(MAGIC_DRVBASE), MAGIC_DRVBASE, 0x0000);
+	if (drvBase == (UINT32)-1)
+	{
+		printf("Driver base offset not found!\n");
+		return;
+	}
+	drvBase = ReadBE32(&arcData[drvBase + 0x06]);
+	songLoadPos = FindPattern2(arcSize, arcData, sizeof(MAGIC_SONGLOAD), MAGIC_SONGLOAD, 0x0000);
+	if (songLoadPos == (UINT32)-1)
+	{
+		printf("Song list not found!\n");
+		return;
+	}
+	tocPos = drvBase + ReadBE16(&arcData[songLoadPos + 0x04]);
+	printf("Song list offset: 0x%04X\n", tocPos);
+	
+	fileCnt = (UINT32)-1;
+	for (tempPos = songLoadPos - 0x02; tempPos > 0 && tempPos >= songLoadPos - 0x10; tempPos -= 0x02)
+	{
+		if (ReadBE16(&arcData[tempPos]) == 0x0C40)
+		{
+			fileCnt = ReadBE16(&arcData[tempPos + 0x02]);
+			break;
+		}
+	}
+	if (fileCnt == (UINT32)-1)
+	{
+		UINT32 lastPtr = 0x00;
+		
+		printf("Song list size not found - falling back to list size detection.\n");
+		// detect number of files
+		fileCnt = 0;
+		for (arcPos = tocPos; arcPos < arcSize; arcPos += 0x04, fileCnt ++)
+		{
+			filePos = ReadBE32(&arcData[arcPos + 0x00]);
+			if (filePos >= drvBase)
+				break;
+			if (filePos)
+			{
+				if (filePos < lastPtr)
+					break;
+				lastPtr = filePos;
+			}
+		}
+	}
+	printf("Files: %u\n", fileCnt);
+	
+	fileExt = strrchr(fileName, '.');
+	if (fileExt == NULL)
+		fileExt = fileName + strlen(fileName);
+	outName = (char*)malloc(strlen(fileName) + 0x10);
+	strcpy(outName, fileName);
+	outExt = outName + (fileExt - fileName);
+	
+	// extract everything
+	arcPos = tocPos;
+	endPos = tocPos + fileCnt * 0x04;
+	lastPos = 0x00;
+	for (curFile = 0; curFile < fileCnt; curFile ++, arcPos += 0x04)
+	{
+		filePos = ReadBE32(&arcData[arcPos + 0x00]);
+		fileSize = 0x00;
+		if (filePos)
+		{
+			for (tempPos = arcPos + 0x04; tempPos < endPos; tempPos += 0x04)
+			{
+				// search for next non-zero, non-duplicate pointer in a sparse list
+				fileSize = ReadBE32(&arcData[tempPos]);
+				if (fileSize && fileSize != filePos)
+					break;
+			}
+			if (fileSize <= filePos || fileSize > drvBase)
+				fileSize = drvBase;
+			fileSize -= filePos;
+		}
+		
+		GenerateFileName(outExt, fileExt, curFile);
+		
+		printf("File %u/%u - pos 0x%06X, len 0x%04X", 1 + curFile, fileCnt, filePos, fileSize);
+		if (filePos == lastPos && !ExtractDupes)
+			printf("    duplicate file - skipping");
+		else if (!filePos || filePos > arcSize || (filePos == arcSize && fileSize > 0))
+			printf("    Bad start offset - ignoring!");
+		else
+			WriteFileData(fileSize, &arcData[filePos], outName);
+		printf("\n");
+		lastPos = filePos;
 	}
 	
 	return;
